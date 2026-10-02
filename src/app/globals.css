@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+/* Warm Parchment & Soft Sage */
+:root {
+  --parchment: #FAF8F5;
+  --paper: #FFFFFF;
+  --sand: #E2DDD5;
+  --espresso: #1E2022;
+  --taupe: #686D76;
+  --sage: #2E7D32;
+  --sage-glow: rgba(46, 125, 50, 0.15);
+  --ochre: #D97706;      /* fills, borders, icons */
+  --ochre-ink: #92400E;  /* amber TEXT: #D97706 on white is only ~3.2:1, this passes AA */
+  --ochre-wash: #FEF3E2;
+  --sage-wash: #EAF4EA;
+}
+
+@theme inline {
+  --color-parchment: var(--parchment);
+  --color-paper: var(--paper);
+  --color-sand: var(--sand);
+  --color-espresso: var(--espresso);
+  --color-taupe: var(--taupe);
+  --color-sage: var(--sage);
+  --color-sage-glow: var(--sage-glow);
+  --color-sage-wash: var(--sage-wash);
+  --color-ochre: var(--ochre);
+  --color-ochre-ink: var(--ochre-ink);
+  --color-ochre-wash: var(--ochre-wash);
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-newsreader), Georgia, serif;
+  --font-mono: var(--font-fira), ui-monospace, monospace;
+}
+
+body { background: var(--parchment); color: var(--espresso); font-family: var(--font-sans); }
+
+/* Jump-to-quote highlight: one gentle pulse, then settles on the glow */
+@keyframes quote-pulse {
+  0%   { background-color: rgba(46, 125, 50, 0.35); }
+  100% { background-color: var(--sage-glow); }
+}
+.quote-highlight { background-color: var(--sage-glow); animation: quote-pulse 1.2s ease-out 2; border-radius: 2px; }
+@media (prefers-reduced-motion: reduce) { .quote-highlight { animation: none; } }
+
+:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; }
