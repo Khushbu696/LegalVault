@@ -20,8 +20,6 @@ interface Props {
   onRetry: () => void;
   onCancelUpload: (key: string) => void;
   onDismissUpload: (key: string) => void;
-  onAskAcrossSelected?: () => void;
-  onCompareSelected?: () => void;
 }
 
 export function DocumentLibrary(p: Props) {
@@ -63,18 +61,6 @@ export function DocumentLibrary(p: Props) {
         <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-ochre/40 bg-ochre-wash px-3 py-2 text-sm">
           <span className="text-ochre-ink">Couldn&apos;t refresh your documents.</span>
           <button onClick={p.onRetry} className="font-medium text-ochre-ink underline">Retry</button>
-        </div>
-      )}
-      {p.multiSelectedIds.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={primaryButton} onClick={p.onAskAcrossSelected ?? undefined} disabled={!p.onAskAcrossSelected}>
-            Ask across selected
-          </button>
-          {p.multiSelectedIds.length >= 2 && (
-            <button type="button" className={ghostButton} onClick={p.onCompareSelected ?? undefined} disabled={!p.onCompareSelected}>
-              Compare contracts
-            </button>
-          )}
         </div>
       )}
       <ul className="space-y-3">

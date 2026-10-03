@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { locateQuoteOccurrence } from "@/lib/documents/citation";
 import { compareContracts } from "@/lib/documents/comparison";
+import { buildMultiDocumentExcerpt } from "@/lib/ai/multi-document-context";
+
+describe("multi-document context recovery", () => {
+  it("retrieves excerpts from canonical text when a ready document has no stored chunks", () => {
+    const document = {
+      id: "doc-a",
+      extractedText: "Services Agreement\n\nThe Contractor shall deliver the services described in Exhibit A.\n\nThe Client shall pay each invoice within thirty (30) days of receipt.",
+      pageRanges: [],
+    };
+
+    const excerpt = buildMultiDocumentExcerpt("What services and payment terms are in this contract?", document, []);
+
+    expect(excerpt).toContain("deliver the services described in Exhibit A");
+    expect(excerpt).toContain("pay each invoice within thirty (30) days");
+  });
+});
 
 describe("citation mapping", () => {
   it("prefers the occurrence that matches the provided context instead of always taking the first match", () => {

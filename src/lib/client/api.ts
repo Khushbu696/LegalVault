@@ -46,6 +46,23 @@ export const listDocumentMessages = (id: string) =>
   request<{ messages: ChatMessageDTO[] }>(`/api/documents/${id}/chat`, { cache: "no-store" }).then((data) => data.messages);
 
 export interface ChatEvent { type: "delta" | "done" | "error"; text?: string; answer?: string; quotes?: ChatMessageDTO["quotes"]; retrievalScope?: ChatMessageDTO["retrievalScope"]; message?: string; }
+export interface MultiQuoteEvent {
+  documentId: string;
+  sourceDocument: string;
+  quoteText: string;
+  startOffset: number | null;
+  endOffset: number | null;
+  pageStart: number | null;
+  status: "verified";
+  reason: string;
+}
+export interface MultiChatEvent {
+  type: "delta" | "done" | "error";
+  text?: string;
+  answer?: string;
+  quotes?: MultiQuoteEvent[];
+  message?: string;
+}
 
 export async function askDocumentQuestion(
   id: string,
@@ -98,5 +115,44 @@ export async function askDocumentQuestion(
         // Ignore malformed final frame.
       }
     }
+  }
+}
+
+export async function askAcrossDocuments(
+  documentIds: string[],
+  question: string,
+  signal: AbortSignal,
+  onEvent: (event: MultiChatEvent) => void,
+): Promise<void> {
+  const res = await fetch("/api/documents/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ documentIds, question }),
+    signal,
+  });
+  if (!res.ok) throw apiErrorFrom(res.status, await res.text());
+  if (!res.body) throw new ApiError("STREAM", "The streaming answer isn't available yet.");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const line = frame.trim();
+      if (!line.startsWith("data:")) continue;
+      let event: MultiChatEvent;
+      try { event = JSON.parse(line.slice(5).trim()) as MultiChatEvent; } catch { continue; }
+      onEvent(event);
+    }
+  }
+  if (buffer.trim().startsWith("data:")) {
+    let event: MultiChatEvent;
+    try { event = JSON.parse(buffer.trim().slice(5).trim()) as MultiChatEvent; } catch { return; }
+    onEvent(event);
   }
 }
