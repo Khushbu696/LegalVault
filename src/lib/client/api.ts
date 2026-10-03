@@ -1,4 +1,4 @@
-import type { AppConfigDTO, DocumentDTO, DocumentTextDTO } from "./types";
+import type { AppConfigDTO, ChatMessageDTO, DocumentDTO, DocumentTextDTO } from "./types";
 
 export class ApiError extends Error {
   constructor(public code: string, message: string, public status = 0) {
@@ -42,3 +42,61 @@ export const listDocuments = async () =>
   (await request<{ documents: DocumentDTO[] }>("/api/documents", { cache: "no-store" })).documents;
 export const deleteDocument = (id: string) => request<void>(`/api/documents/${id}`, { method: "DELETE" });
 export const getDocumentText = (id: string) => request<DocumentTextDTO>(`/api/documents/${id}/text`);
+export const listDocumentMessages = (id: string) =>
+  request<{ messages: ChatMessageDTO[] }>(`/api/documents/${id}/chat`, { cache: "no-store" }).then((data) => data.messages);
+
+export interface ChatEvent { type: "delta" | "done" | "error"; text?: string; answer?: string; quotes?: ChatMessageDTO["quotes"]; retrievalScope?: ChatMessageDTO["retrievalScope"]; message?: string; }
+
+export async function askDocumentQuestion(
+  id: string,
+  question: string,
+  signal: AbortSignal,
+  onEvent: (event: ChatEvent) => void,
+): Promise<void> {
+  const res = await fetch(`/api/documents/${id}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+    signal,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw apiErrorFrom(res.status, text);
+  }
+
+  if (!res.body) throw new ApiError("STREAM", "The streaming answer isn't available yet.");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      try {
+        const payload = JSON.parse(line.slice(5).trim()) as ChatEvent;
+        onEvent(payload);
+      } catch {
+        // Ignore malformed frame lines from the stream.
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    const line = buffer.trim();
+    if (line.startsWith("data:")) {
+      try {
+        onEvent(JSON.parse(line.slice(5).trim()) as ChatEvent);
+      } catch {
+        // Ignore malformed final frame.
+      }
+    }
+  }
+}

@@ -6,6 +6,8 @@ import { getDocumentText, messageOf } from "@/lib/client/api";
 import { emptyPagesNote } from "@/lib/client/status";
 import type { DocumentDTO, DocumentTextDTO } from "@/lib/client/types";
 
+interface QuoteHighlight { startOffset: number; endOffset: number }
+
 type State = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; data: DocumentTextDTO };
 
 /**
@@ -13,7 +15,7 @@ type State = { kind: "loading" } | { kind: "error"; message: string } | { kind: 
  * (never re-flowed), so Step 11 can highlight a verified quote by the same offsets.
  * Mount with key={doc.id} so state resets per document.
  */
-export function ReaderPane({ doc }: { doc: DocumentDTO }) {
+export function ReaderPane({ doc, highlight }: { doc: DocumentDTO; highlight?: QuoteHighlight | null }) {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
 
@@ -53,14 +55,32 @@ export function ReaderPane({ doc }: { doc: DocumentDTO }) {
           </div>
         )}
 
-        {state.kind === "ready" && <ReaderBody data={state.data} />}
+        {state.kind === "ready" && <ReaderBody data={state.data} highlight={highlight} />}
       </div>
     </section>
   );
 }
 
-function ReaderBody({ data }: { data: DocumentTextDTO }) {
+function ReaderBody({ data, highlight }: { data: DocumentTextDTO; highlight?: QuoteHighlight | null }) {
   const note = emptyPagesNote(data.emptyPages);
+
+  const renderText = (pageText: string, pageStart: number) => {
+    if (!highlight) return pageText;
+    if (highlight.startOffset < pageStart || highlight.endOffset > pageStart + pageText.length) return pageText;
+    const startIndex = Math.max(0, highlight.startOffset - pageStart);
+    const endIndex = Math.min(pageText.length, highlight.endOffset - pageStart);
+    const before = pageText.slice(0, startIndex);
+    const match = pageText.slice(startIndex, endIndex);
+    const after = pageText.slice(endIndex);
+    return (
+      <>
+        {before}
+        <mark className="quote-highlight">{match}</mark>
+        {after}
+      </>
+    );
+  };
+
   return (
     <article className="mx-auto max-w-2xl">
       {note && (
@@ -73,12 +93,12 @@ function ReaderBody({ data }: { data: DocumentTextDTO }) {
           <section key={r.page} id={`page-${r.page}`} className="mb-10" aria-label={`Page ${r.page}`}>
             <p className="mb-2 select-none font-mono text-xs text-taupe">Page {r.page}</p>
             <p className="whitespace-pre-wrap font-serif text-[1.0625rem] leading-relaxed" data-start={r.start}>
-              {data.text.slice(r.start, r.end) || <span className="italic text-taupe">No readable text on this page.</span>}
+              {renderText(data.text.slice(r.start, r.end), r.start) || <span className="italic text-taupe">No readable text on this page.</span>}
             </p>
           </section>
         ))
       ) : (
-        <p className="whitespace-pre-wrap font-serif text-[1.0625rem] leading-relaxed" data-start={0}>{data.text}</p>
+        <p className="whitespace-pre-wrap font-serif text-[1.0625rem] leading-relaxed" data-start={0}>{renderText(data.text, 0)}</p>
       )}
     </article>
   );

@@ -145,7 +145,7 @@ export default function AppShell() {
       </NoticePanel>
     );
   } else {
-    view = <Workspace doc={selected} mobileTab={mobileTab} onMobileTab={setMobileTab} onOpenLibrary={() => setDrawerOpen(true)} />;
+    view = <Workspace doc={selected} mobileTab={mobileTab} onMobileTab={setMobileTab} onOpenLibrary={() => router.replace("/")} />;
   }
 
   return (

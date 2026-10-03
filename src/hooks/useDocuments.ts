@@ -34,7 +34,10 @@ export function useDocuments(onTransition?: (e: TransitionEvent) => void) {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const timer = setTimeout(() => { void refresh(); }, 0);
+    return () => clearTimeout(timer);
+  }, [refresh]);
 
   const active = documents?.some((d) => isProcessing(d.status)) ?? false;
   useEffect(() => {

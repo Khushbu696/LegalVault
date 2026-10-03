@@ -1,13 +1,12 @@
 import type { Repositories } from "../repositories/types";
 import { MESSAGES } from "../documents/messages";
+import { buildDocumentChunks } from "../documents/chunks";
 import { ExtractionError, extractDocument } from "../extraction";
 
 /**
  * Runs after the client has uploaded every part and the document was claimed (uploading -> extracting).
  * Always ends in `ready` or `failed`. A failed document never keeps text, chunks or the stored file,
  * so a scanned/unreadable PDF can never look like a successful, empty document.
- *
- * NOTE (Step 4): "ready" currently means "text extracted". Step 6 adds chunking before `ready`.
  */
 export async function processUploadedDocument(
   repos: Repositories,
@@ -34,11 +33,29 @@ export async function processUploadedDocument(
     }
 
     const result = await extractDocument(buffer, doc.fileType, opts);
+    const chunks = buildDocumentChunks(result.text, result.pageRanges).map((chunk) => ({
+      ...chunk,
+      documentId: id,
+      sectionHeading: chunk.sectionHeading ?? null,
+    }));
+
     await repos.documents.update(id, {
       extractedText: result.text,
       pageRanges: result.pageRanges,
       emptyPages: result.emptyPages,
       charCount: result.text.length,
+      chunkCount: chunks.length,
+      status: "chunking",
+      errorCode: null,
+      errorMessage: null,
+    });
+
+    if (chunks.length > 0) {
+      await repos.chunks.insertMany(chunks);
+    }
+
+    await repos.documents.update(id, {
+      chunkCount: chunks.length,
       status: "ready",
       errorCode: null,
       errorMessage: null,
@@ -58,5 +75,6 @@ export async function processUploadedDocument(
     });
     if (storageRef) await repos.storage.remove(storageRef).catch(() => undefined);
     await repos.uploads.deleteByDocument(id).catch(() => undefined);
+    await repos.chunks.deleteByDocument(id).catch(() => undefined);
   }
 }

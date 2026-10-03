@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChatPane } from "./ChatPane";
 import { ArrowLeftIcon, LibraryIcon } from "./icons";
 import { ghostButton } from "./NoticePanel";
@@ -18,6 +18,8 @@ interface Props {
 
 /** Selected-document view: header + 40% chat / 60% document reader (stacked with tabs on small screens). */
 export function Workspace({ doc, onOpenLibrary, mobileTab, onMobileTab }: Props) {
+  const [quoteFocus, setQuoteFocus] = useState<{ startOffset: number; endOffset: number } | null>(null);
+
   return (
     <div className="flex h-screen flex-col">
       <header className="flex items-center gap-3 border-b border-sand bg-paper px-4 py-3">
@@ -39,10 +41,10 @@ export function Workspace({ doc, onOpenLibrary, mobileTab, onMobileTab }: Props)
 
       <div className="grid min-h-0 flex-1 md:grid-cols-[2fr_3fr]">
         <div className={`${mobileTab === "chat" ? "flex" : "hidden"} min-h-0 flex-col border-r border-sand md:flex`}>
-          <ChatPane doc={doc} />
+          <ChatPane doc={doc} onQuoteSelect={setQuoteFocus} />
         </div>
         <div className={`${mobileTab === "document" ? "flex" : "hidden"} min-h-0 flex-col md:flex`}>
-          <ReaderPane key={doc.id} doc={doc} />
+          <ReaderPane key={doc.id} doc={doc} highlight={quoteFocus} />
         </div>
       </div>
     </div>

@@ -31,3 +31,33 @@ export interface UploadItem {
   phase: "sending" | "error";
   error?: string;
 }
+
+export type QuoteStatus = "verified" | "unverified";
+export interface QuoteDTO {
+  ordinal: number;
+  quoteText: string;
+  normalizedQuote: string;
+  status: QuoteStatus;
+  matchType: "exact" | "whitespace" | "punctuation" | null;
+  startOffset: number | null;
+  endOffset: number | null;
+  matchedText: string | null;
+  occurrenceCount: number;
+  occurrenceIndex: number | null;
+  chunkId: string | null;
+  pageStart: number | null;
+  reason: string | null;
+}
+
+export type MessageStatus = "streaming" | "complete" | "stopped" | "error";
+export interface ChatMessageDTO {
+  id: string;
+  chatId: string;
+  documentId: string;
+  role: "user" | "assistant";
+  content: string;
+  status: MessageStatus;
+  quotes: QuoteDTO[];
+  retrievalScope: { chunkIndexes: number[]; totalChunks: number; coverage: "full" | "partial" } | null;
+  createdAt: string;
+}
