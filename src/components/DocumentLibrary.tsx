@@ -13,11 +13,15 @@ interface Props {
   loadError: string | null;
   uploads: UploadItem[];
   selectedId: string | null;
+  multiSelectedIds: string[];
   onSelect: (id: string) => void;
+  onToggleMultiSelect: (id: string) => void;
   onDelete: (id: string) => Promise<void>;
   onRetry: () => void;
   onCancelUpload: (key: string) => void;
   onDismissUpload: (key: string) => void;
+  onAskAcrossSelected?: () => void;
+  onCompareSelected?: () => void;
 }
 
 export function DocumentLibrary(p: Props) {
@@ -61,13 +65,25 @@ export function DocumentLibrary(p: Props) {
           <button onClick={p.onRetry} className="font-medium text-ochre-ink underline">Retry</button>
         </div>
       )}
+      {p.multiSelectedIds.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={primaryButton} onClick={p.onAskAcrossSelected ?? undefined} disabled={!p.onAskAcrossSelected}>
+            Ask across selected
+          </button>
+          {p.multiSelectedIds.length >= 2 && (
+            <button type="button" className={ghostButton} onClick={p.onCompareSelected ?? undefined} disabled={!p.onCompareSelected}>
+              Compare contracts
+            </button>
+          )}
+        </div>
+      )}
       <ul className="space-y-3">
         {uploads.map((u) => (
           <UploadRow key={u.key} item={u} onCancel={() => p.onCancelUpload(u.key)} onDismiss={() => p.onDismissUpload(u.key)} />
         ))}
         {documents.map((d) => (
-          <DocumentRow key={d.id} doc={d} selected={d.id === p.selectedId}
-            onOpen={() => p.onSelect(d.id)} onDelete={() => p.onDelete(d.id)} />
+          <DocumentRow key={d.id} doc={d} selected={d.id === p.selectedId} multiSelected={p.multiSelectedIds.includes(d.id)}
+            onOpen={() => p.onSelect(d.id)} onToggleMultiSelect={() => p.onToggleMultiSelect(d.id)} onDelete={() => p.onDelete(d.id)} />
         ))}
       </ul>
     </div>
@@ -109,8 +125,8 @@ function UploadRow({ item, onCancel, onDismiss }: { item: UploadItem; onCancel: 
   );
 }
 
-function DocumentRow({ doc, selected, onOpen, onDelete }: {
-  doc: DocumentDTO; selected: boolean; onOpen: () => void; onDelete: () => Promise<void>;
+function DocumentRow({ doc, selected, multiSelected, onOpen, onToggleMultiSelect, onDelete }: {
+  doc: DocumentDTO; selected: boolean; multiSelected: boolean; onOpen: () => void; onToggleMultiSelect: () => void; onDelete: () => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -126,6 +142,13 @@ function DocumentRow({ doc, selected, onOpen, onDelete }: {
   return (
     <li className={`rounded-xl border bg-paper p-4 shadow-[0_1px_2px_rgba(30,32,34,0.04)] ${selected ? "border-sage" : "border-sand"}`}>
       <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={multiSelected}
+          onChange={onToggleMultiSelect}
+          aria-label={`Select ${doc.originalFilename} for a multi-document question`}
+          className="mt-1 h-4 w-4 accent-sage"
+        />
         <FileIcon className="mt-0.5 h-5 w-5 shrink-0 text-taupe" />
         <div className="min-w-0 flex-1">
           {ready ? (

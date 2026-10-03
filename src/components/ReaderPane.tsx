@@ -64,6 +64,16 @@ export function ReaderPane({ doc, highlight }: { doc: DocumentDTO; highlight?: Q
 function ReaderBody({ data, highlight }: { data: DocumentTextDTO; highlight?: QuoteHighlight | null }) {
   const note = emptyPagesNote(data.emptyPages);
 
+  useEffect(() => {
+    if (!highlight || !data.pageRanges.length) return;
+    const page = data.pageRanges.find((range) => highlight.startOffset >= range.start && highlight.endOffset <= range.end) ?? data.pageRanges.find((range) => highlight.startOffset >= range.start && highlight.startOffset <= range.end) ?? data.pageRanges[0];
+    if (!page) return;
+    const target = document.getElementById(`page-${page.page}`);
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [data.pageRanges, highlight]);
+
   const renderText = (pageText: string, pageStart: number) => {
     if (!highlight) return pageText;
     if (highlight.startOffset < pageStart || highlight.endOffset > pageStart + pageText.length) return pageText;
