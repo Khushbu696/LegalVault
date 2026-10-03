@@ -6,7 +6,8 @@ export type DocumentStatus =
   | "uploading" | "extracting" | "chunking" | "ready" | "failed";
 export type ErrorCode =
   | "SCANNED_PDF" | "UNSUPPORTED_TYPE" | "TOO_LARGE" | "TOO_MANY_PAGES"
-  | "CORRUPT_FILE" | "EXTRACTION_FAILED";
+  | "CORRUPT_FILE" | "EXTRACTION_FAILED" | "PASSWORD_PROTECTED" | "EMPTY_DOCUMENT"
+  | "INVALID_REQUEST" | "UPLOAD_INCOMPLETE" | "PROCESSING_TIMEOUT";
 
 export interface PageRange { page: number; start: number; end: number } // offsets into extractedText
 
@@ -22,6 +23,9 @@ export interface DocumentRecord {
   errorMessage: string | null;
   charCount: number;
   chunkCount: number;
+  sizeBytes: number;
+  /** 1-based PDF pages with no extractable text (blank or scanned). Content on them is NOT searchable. */
+  emptyPages: number[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -72,16 +76,23 @@ export interface MessageRecord {
 }
 
 export interface DocumentRepository {
-  create(input: Pick<DocumentRecord, "originalFilename" | "fileType">): Promise<DocumentRecord>;
+  create(input: Pick<DocumentRecord, "originalFilename" | "fileType"> & { sizeBytes?: number }): Promise<DocumentRecord>;
   get(id: string): Promise<DocumentRecord | null>;
   list(): Promise<Omit<DocumentRecord, "extractedText">[]>; // list never ships full text
   update(id: string, patch: Partial<Omit<DocumentRecord, "id" | "createdAt">>): Promise<void>;
-  delete(id: string): Promise<void>; // repository is responsible for cascading to chunks/chats/messages
+  /** Atomic compare-and-set on status. Returns true only for the caller that made the change. */
+  transitionStatus(
+    id: string,
+    from: DocumentStatus,
+    patch: Partial<Omit<DocumentRecord, "id" | "createdAt">>,
+  ): Promise<boolean>;
+  delete(id: string): Promise<void>; // repository is responsible for cascading to chunks/chats/messages/upload parts
 }
 
 export interface ChunkRepository {
   insertMany(chunks: Omit<ChunkRecord, "id">[]): Promise<void>;
   listByDocument(documentId: string): Promise<ChunkRecord[]>; // BM25 runs in-app over these
+  deleteByDocument(documentId: string): Promise<void>;
 }
 
 export interface ChatRepository {
@@ -97,8 +108,18 @@ export interface FileStorage {
   remove(ref: string): Promise<void>;
 }
 
+/** Temporary storage for the parts of an in-progress chunked upload. */
+export interface UploadPartRepository {
+  putPart(documentId: string, index: number, data: Buffer): Promise<void>; // idempotent per (documentId, index)
+  getPart(documentId: string, index: number): Promise<Buffer | null>;
+  getParts(documentId: string): Promise<{ index: number; data: Buffer }[]>; // sorted by index
+  listIndexes(documentId: string): Promise<number[]>;
+  deleteByDocument(documentId: string): Promise<void>;
+}
+
 export interface Repositories {
   documents: DocumentRepository;
+  uploads: UploadPartRepository;
   chunks: ChunkRepository;
   chats: ChatRepository;
   storage: FileStorage;
