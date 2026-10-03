@@ -7,8 +7,18 @@ const newsreader = Newsreader({ subsets: ["latin"], variable: "--font-newsreader
 const fira = Fira_Code({ subsets: ["latin"], variable: "--font-fira" });
 
 export const metadata: Metadata = {
-  title: "Contract Analyser",
-  description: "Ask questions about a contract. Every answer is backed by quotes checked against the document.",
+  title: "Legal Vault",
+  description: "AI-powered contract analysis with verified citations and document comparison.",
+  icons: {
+    icon: [
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+  },
+  manifest: '/site.webmanifest',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

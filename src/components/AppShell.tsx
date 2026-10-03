@@ -103,8 +103,8 @@ export default function AppShell() {
     <>
       <main className="mx-auto w-full max-w-3xl space-y-6 px-4 py-10 pb-32">
         <header>
-          <h1 className="text-2xl font-semibold">Contract Analyser</h1>
-          <p className="mt-1 text-taupe">Upload and organize your contracts.</p>
+          <h1 className="text-2xl font-semibold">Legal Vault</h1>
+          <p className="mt-1 text-taupe">Analyze, compare, and understand your contracts.</p>
         </header>
         {library}
       </main>

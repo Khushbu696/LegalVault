@@ -1,36 +1,106 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Legal Vault
 
-## Getting Started
+Legal Vault is an AI-powered web application for analyzing and comparing PDF and DOCX contracts.
 
-First, run the development server:
+Users can upload contracts, ask questions about their contents, view answers with independently verified quotes, navigate to highlighted citations, analyze multiple documents together, and compare two contract versions at the clause level.
+
+## Main Screens
+
+### Upload and Document Library
+
+![Upload and document library](screenshots/upload.jpeg)
+
+### Chat with Verified Quotes
+
+![Chat with verified quotes](screenshots/chat.jpeg)
+
+### Citation Highlighting
+
+![Citation highlighting in the document reader](screenshots/citation.jpeg)
+
+### Document Comparison
+
+![Clause-level document comparison](screenshots/comparison.jpeg)
+
+## Run Locally
+
+### Requirements
+
+- Node.js 20.9 or newer
+- npm
+- A MongoDB database (MongoDB Atlas or a compatible MongoDB deployment)
+- An OpenAI-compatible API endpoint and API key for AI features
+
+
+### Setup
+
+1. Install dependencies:
+
+	```bash
+	npm install
+	```
+
+2. Create `.env.local` in the project root:
+
+	```dotenv
+	MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>/<database>
+	MONGODB_DB=contract_analyser
+
+	AI_API_KEY=<your-api-key>
+	AI_BASE_URL=https://api.openai.com/v1
+	AI_MODEL=gpt-6-luna
+
+	MAX_UPLOAD_MB=50
+	MAX_PAGES=150
+	```
+
+	`MONGODB_URI`, `AI_API_KEY`, `AI_BASE_URL`, and `AI_MODEL` are required. `MONGODB_DB`, `MAX_UPLOAD_MB`, and `MAX_PAGES` have defaults. `AI_MODEL` remains configurable; use a model available to your configured provider.
+
+3. Start the development server:
+
+	```bash
+	npm run dev
+	```
+
+4. Open [http://localhost:3000](http://localhost:3000).
+
+### Useful Commands
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm test       # Run the Vitest suite
+npm run lint   # Run ESLint
+npm run build  # Build for production
+npm start      # Serve the production build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Feature Status
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Part A: Complete
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- PDF/DOCX upload and document library
+- Text extraction and processing status
+- Large-document retrieval (up to 150 pages)
+- Single-document contract chat with streaming
+- Saved per-document chat history
+- Independently verified quotes
+- Citation navigation and highlighting
 
-## Learn More
+### Part B: Complete
 
-To learn more about Next.js, take a look at the following resources:
+- Multi-document question answering
+- Source-specific verified citations
+- Clause-level contract comparison
+- Added, removed, modified, and unchanged clause detection
+- Significance classification of changes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Part C — Not Implemented
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+No Part C feature was implemented.
 
-## Deploy on Vercel
+### Not Included
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Authentication and user accounts
+- OCR for scanned-only documents
+- Word tracked-change redlining
+- Agentic external document research
+- Production audit logging
