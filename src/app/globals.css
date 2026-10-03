@@ -43,3 +43,13 @@ body { background: var(--parchment); color: var(--espresso); font-family: var(--
 @media (prefers-reduced-motion: reduce) { .quote-highlight { animation: none; } }
 
 :focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; }
+
+/* Indeterminate progress bar for server-side processing (no fake percentages) */
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.indeterminate-bar { animation: indeterminate 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .indeterminate-bar { animation: none; width: 100%; opacity: 0.5; }
+}
