@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isValidAiModelName } from "@/lib/config/env";
+import { aiModelIdSchema } from "@/lib/config/env";
 
 describe("AI configuration", () => {
-  it("rejects placeholder model names and accepts real OpenAI models", () => {
-    expect(isValidAiModelName("gpt-6-luna")).toBe(false);
-    expect(isValidAiModelName("gpt-4o-mini")).toBe(true);
-    expect(isValidAiModelName("gpt-4.1-mini")).toBe(true);
+  it("accepts configurable model IDs and rejects an empty value", () => {
+    expect(aiModelIdSchema.parse("gpt-6-luna")).toBe("gpt-6-luna");
+    expect(aiModelIdSchema.parse("custom-model-id")).toBe("custom-model-id");
+    expect(() => aiModelIdSchema.parse("  ")).toThrow("AI_MODEL is required");
   });
 });

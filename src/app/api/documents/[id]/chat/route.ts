@@ -73,17 +73,9 @@ export const POST = handle<P>(async (req, { id }) => {
     coverage: relevant.coverage,
   };
 
-  const contextText = buildChunkContext(relevant.selected.length > 0 ? relevant.selected : [{
-    id: "full-document",
-    documentId: id,
-    chunkIndex: 0,
-    text: doc.extractedText,
-    startOffset: 0,
-    endOffset: doc.extractedText.length,
-    pageStart: doc.pageRanges[0]?.page ?? 1,
-    pageEnd: doc.pageRanges.at(-1)?.page ?? 1,
-    sectionHeading: "Document text",
-  }]);
+  const contextText = relevant.selected.length > 0
+    ? buildChunkContext(relevant.selected)
+    : "No relevant document excerpts were selected. Do not infer an answer from this absence.";
 
   await repos.chats.addMessage({
     chatId: chat.id,
@@ -128,7 +120,10 @@ export const POST = handle<P>(async (req, { id }) => {
     "You are a legal-contract analysis assistant. Use only the provided document excerpts. Never invent a quote or claim a statement is present unless it appears in the supplied text.",
     "If the answer is not supported by those sections, say exactly: 'I couldn't find support for this in the sections searched.'",
     "If the question is supported, answer in plain English and include a compact JSON object in the response body with: { answer: string, quotes: [{ quote: string }] }.",
-    `Important: the retrieval covered ${relevant.chunkIndexes.length} of ${relevant.totalChunks} sections. If coverage is partial, state that the search was limited and do not claim the whole document is absent of support.`,
+    `The AI received ${relevant.chunkIndexes.length} of ${relevant.totalChunks} document sections. If coverage is partial, say the search was limited and do not claim the whole document is absent of support.`,
+    relevant.documentWide
+      ? "This is a document-wide presence question. When coverage is partial, never answer with a confident no or claim the topic is absent; report only what was or was not found in the supplied sections and state the limitation. Even with full coverage, describe a lack of matching evidence rather than making a legal conclusion."
+      : "When a section or page was specified, prioritize the supplied matching section or page over unrelated excerpts.",
     "Never mention page numbers or offsets that the model cannot prove from the excerpts.",
   ].join("\n");
 
@@ -136,7 +131,6 @@ export const POST = handle<P>(async (req, { id }) => {
   try {
     stream = await client.chat.completions.create({
       model: aiEnv.AI_MODEL,
-      temperature: 0.1,
       messages: [
         { role: "system", content: prompt },
         ...prior.slice(-8).map((message) => ({ role: message.role, content: message.content })),

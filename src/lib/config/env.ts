@@ -1,11 +1,6 @@
 import { z } from "zod";
 
-export function isValidAiModelName(value: string): boolean {
-  const model = value.trim();
-  if (!model) return false;
-  if (/placeholder|mock|example|test|fake|luna/i.test(model)) return false;
-  return /^gpt-[a-z0-9.-]+$/i.test(model);
-}
+export const aiModelIdSchema = z.string().trim().min(1, "AI_MODEL is required");
 
 /** Each group is validated lazily and independently, so a missing AI key never breaks upload/DB code. */
 function lazyEnv<T extends z.ZodType>(name: string, schema: T): () => z.output<T> {
@@ -43,8 +38,6 @@ export const getAiEnv = lazyEnv(
   z.object({
     AI_API_KEY: z.string().min(1, "AI_API_KEY is required"),
     AI_BASE_URL: z.url("AI_BASE_URL must be a valid URL"),
-    AI_MODEL: z.string().trim().min(1, "AI_MODEL is required").refine(isValidAiModelName, {
-      message: "AI_MODEL must be a real model name like gpt-4o-mini",
-    }),
+    AI_MODEL: aiModelIdSchema,
   }),
 );

@@ -143,7 +143,9 @@ export function ChatPane({ doc, onQuoteSelect }: { doc: DocumentDTO; onQuoteSele
 
                 {message.retrievalScope && message.retrievalScope.coverage === "partial" && (
                   <p className="mt-2 rounded-md border border-ochre/30 bg-ochre-wash px-2 py-1 text-xs text-ochre-ink">
-                    Searched {message.retrievalScope.chunkIndexes.length} of {message.retrievalScope.totalChunks} sections matching this question. Other sections were not examined.
+                    {message.retrievalScope.totalChunks === 0
+                      ? "No searchable sections were indexed, so the document could not be fully searched."
+                      : `Searched ${message.retrievalScope.chunkIndexes.length} of ${message.retrievalScope.totalChunks} sections for this question. Other sections were not examined.`}
                   </p>
                 )}
 
