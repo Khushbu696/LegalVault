@@ -18,9 +18,19 @@ export const POST = handle(async (request) => {
   }
 
   const comparison = compareContracts(docA.extractedText, docB.extractedText);
+  for (const alignment of comparison.alignments) {
+    console.info("[comparison:clause-alignment]", {
+      sectionNumber: alignment.sectionNumber,
+      versionA: alignment.oldHeading || (alignment.sectionNumber ? `Section ${alignment.sectionNumber}` : "Unnumbered paragraph"),
+      versionB: alignment.newHeading || (alignment.sectionNumber ? `Section ${alignment.sectionNumber}` : "Unnumbered paragraph"),
+      matchType: alignment.matchType,
+      status: alignment.status,
+    });
+  }
   let summary = comparison.summary;
   let summarySource: "ai" | "local" = "local";
   try {
+    if (comparison.changes.length === 0) throw new Error("No changed clauses require an AI summary.");
     const aiEnv = getAiEnv();
     const client = new OpenAI({ apiKey: aiEnv.AI_API_KEY, baseURL: aiEnv.AI_BASE_URL });
     const completion = await client.chat.completions.create({
@@ -28,9 +38,10 @@ export const POST = handle(async (request) => {
       messages: [{
         role: "user",
         content: [
-          "Summarize the material contract changes in the supplied clause-level comparison.",
-          "Use only the provided differences. Do not infer missing terms or legal outcomes. Return 1-3 concise sentences.",
-          JSON.stringify(comparison.changes),
+          "Explain only the verified differences between the supplied Version A and Version B clause texts.",
+          "Do not add, infer, or mention any change not directly supported by those exact source texts. Do not rewrite or alter the quoted clause text.",
+          "Return a concise factual summary of the differences only. The deterministic change list is authoritative; do not add clauses to it.",
+          JSON.stringify(comparison.changes.map(({ sectionNumber, label, status, oldText, newText }) => ({ sectionNumber, label, status, versionAText: oldText, versionBText: newText }))),
         ].join("\n\n"),
       }],
     });
@@ -47,6 +58,7 @@ export const POST = handle(async (request) => {
     summary,
     summarySource,
     changes: comparison.changes,
+    alignments: comparison.alignments,
     documents: {
       docA: { id: docA.id, filename: docA.originalFilename },
       docB: { id: docB.id, filename: docB.originalFilename },
