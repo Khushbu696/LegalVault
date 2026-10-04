@@ -8,8 +8,10 @@ interface QuoteFocus {
   endOffset: number;
 }
 
+type ChatMessageView = ChatMessageDTO & { researchActivity?: string[] };
+
 export function ChatPane({ doc, onQuoteSelect }: { doc: DocumentDTO; onQuoteSelect?: (quote: QuoteFocus | null) => void }) {
-  const [messages, setMessages] = useState<ChatMessageDTO[]>([]);
+  const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +87,12 @@ export function ChatPane({ doc, onQuoteSelect }: { doc: DocumentDTO; onQuoteSele
               { ...last, content: `${last.content}${event.text ?? ""}`, status: "streaming" },
             ];
           }
+          if (event.type === "agent_activity") {
+            return [
+              ...current.slice(0, -1),
+              { ...last, researchActivity: [...(last.researchActivity ?? []), event.message ?? "Research step completed."] },
+            ];
+          }
           if (event.type === "done") {
             return [
               ...current.slice(0, -1),
@@ -139,6 +147,14 @@ export function ChatPane({ doc, onQuoteSelect }: { doc: DocumentDTO; onQuoteSele
                   {message.status === "stopped" && <span className="font-mono text-[10px] text-ochre-ink">Stopped</span>}
                   {message.status === "error" && <span className="font-mono text-[10px] text-ochre-ink">Error</span>}
                 </div>
+                {message.researchActivity && message.researchActivity.length > 0 && (
+                  <details open={message.status === "streaming"} className="mt-2 rounded-md border border-sand bg-paper/70 px-3 py-2">
+                    <summary className="cursor-pointer text-xs font-semibold text-sage">Research steps ({message.researchActivity.length})</summary>
+                    <ol className="mt-2 list-inside list-decimal space-y-1 text-xs leading-5 text-taupe">
+                      {message.researchActivity.map((activity, index) => <li key={`${message.id}-research-${index}`}>{activity}</li>)}
+                    </ol>
+                  </details>
+                )}
                 <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-espresso">{message.content || (message.status === "streaming" ? "Generating…" : "")}</div>
 
                 {message.retrievalScope && message.retrievalScope.coverage === "partial" && (

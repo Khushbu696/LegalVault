@@ -4,6 +4,10 @@ Legal Vault is an AI-powered web application for analyzing and comparing PDF and
 
 Users can upload contracts, ask questions about their contents, view answers with independently verified quotes, navigate to highlighted citations, analyze multiple documents together, and compare two contract versions at the clause level.
 
+## Live Link
+
+**[Open Legal Vault](https://legal-vault-eosin.vercel.app/)**
+
 ## Main Screens
 
 ### Upload and Document Library
@@ -93,9 +97,14 @@ npm start      # Serve the production build
 - Added, removed, modified, and unchanged clause detection
 - Significance classification of changes
 
-### Part C — Not Implemented
+### Part C — Option 2: Agentic Document Research
 
-No Part C feature was implemented.
+- Tool-based document research
+- Multi-round agent/tool loop
+- Visible research activity
+- Hard research-round limit
+- Invalid tool-call handling
+- Independently verified final citations
 
 ### Not Included
 

@@ -1,10 +1,14 @@
 import OpenAI from "openai";
-import { buildChunkContext, retrieveRelevantChunks } from "@/lib/ai/retrieval";
+import type { FunctionTool, ResponseInputItem } from "openai/resources/responses/responses";
+import { guardPartialCoverageAnswer } from "@/lib/ai/answer-safety";
+import { runAgentToolLoop, type AgentToolCall } from "@/lib/ai/agent-loop";
+import { executeDocumentResearchTool, findNumberedSections, getCoveredResearchIndexes, selectEvidenceQuote } from "@/lib/ai/document-research-tools";
 import { verifyQuoteAgainstDocument } from "@/lib/ai/verify";
 import { getAiEnv } from "@/lib/config/env";
+import { buildDocumentChunks } from "@/lib/documents/chunks";
 import { apiError, handle } from "@/lib/http";
 import { getRepositories } from "@/lib/repositories";
-import type { QuoteRecord } from "@/lib/repositories/types";
+import type { ChunkRecord, QuoteRecord } from "@/lib/repositories/types";
 
 type P = { id: string };
 
@@ -17,6 +21,23 @@ function parseStructuredAnswer(raw: string): StructuredAnswer {
   const trimmed = raw.trim();
   if (!trimmed) {
     return { answer: "I couldn't find support for this in the sections searched.", quotes: [] };
+  }
+
+  const quoteMarker = trimmed.indexOf("<QUOTES>");
+  if (quoteMarker >= 0) {
+    const answer = trimmed.slice(0, quoteMarker).trim();
+    try {
+      const parsed: unknown = JSON.parse(trimmed.slice(quoteMarker + "<QUOTES>".length).trim());
+      const items = Array.isArray(parsed) ? parsed : [];
+      return {
+        answer: answer || "I couldn't find support for this in the sections searched.",
+        quotes: items
+          .map((item) => typeof item?.quote === "string" ? item.quote : typeof item?.text === "string" ? item.text : "")
+          .filter((quote) => quote.trim().length > 0),
+      };
+    } catch {
+      return { answer: answer || "I couldn't find support for this in the sections searched.", quotes: [] };
+    }
   }
 
   const candidate = trimmed.match(/\{[\s\S]*\}/)?.[0] ?? trimmed;
@@ -42,6 +63,102 @@ function verifyQuotes(documentText: string, quotes: string[], pageRanges: { page
   }) satisfies QuoteRecord[];
 }
 
+const RESEARCH_TOOLS: FunctionTool[] = [
+  {
+    type: "function",
+    name: "list_clauses",
+    description: "List the selected contract's actual numbered clauses, or its available text chunks when there are no numbered clauses.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: { documentId: { type: "string" } },
+      required: ["documentId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "search_document",
+    description: "Search the selected contract for relevant, bounded excerpts. Use a focused query.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: { documentId: { type: "string" }, query: { type: "string" } },
+      required: ["documentId", "query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "get_section",
+    description: "Read the complete text of one numbered clause, if it exists and is within the section size limit.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: { documentId: { type: "string" }, sectionNumber: { type: "string" } },
+      required: ["documentId", "sectionNumber"],
+      additionalProperties: false,
+    },
+  },
+];
+
+const MAX_RESEARCH_EVIDENCE_CHARS = 30_000;
+
+function researchInstructions(documentId: string, limitedCoverage: boolean): string {
+  return [
+    "You are researching one specific legal contract. You may use only the explicitly provided document research tools for document evidence.",
+    `The selected document ID is ${documentId}. Every tool call must use exactly this ID.`,
+    "Do not answer from general knowledge when the question requires contract evidence. Never invent clauses, sections, facts, or quotations.",
+    "Use list_clauses first when understanding the structure would help, search_document for targeted discovery, and get_section when a complete numbered clause is needed.",
+    "Do not claim information, rights, clauses, or conditions are absent from the whole document unless every document chunk was retrieved and searched. With partial coverage, avoid negative conclusions and say that the retrieved sections do not establish the point.",
+    limitedCoverage ? "Search coverage is limited; do not make document-wide negative claims." : "Use only evidence returned by the document tools.",
+    "For the final response, write a concise plain-English answer based only on retrieved evidence. Then write <QUOTES> on a new line followed by a JSON array of objects shaped like {\"quote\":\"exact source text\"}. Include only short verbatim quotes; never claim a quote is verified.",
+  ].join("\n");
+}
+
+function activityForTool(call: AgentToolCall, documentId: string, documentText: string): string {
+  let args: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(call.arguments);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
+  } catch {
+    return "Validating a document research request...";
+  }
+  if (args.documentId !== documentId) return "Rejecting a request outside the selected document...";
+  if (call.name === "list_clauses") return "Reviewing document structure...";
+  if (call.name === "search_document") {
+    const query = typeof args.query === "string" ? args.query.trim().slice(0, 120) : "requested terms";
+    return `Searching for: ${query || "requested terms"}`;
+  }
+  if (call.name === "get_section") {
+    const number = typeof args.sectionNumber === "string" ? args.sectionNumber : "requested";
+    const section = findNumberedSections(documentText).find((item) => item.number === number);
+    return `Reading Section ${number}${section?.title ? ` - ${section.title}` : ""}...`;
+  }
+  return "Validating an unsupported document tool...";
+}
+
+function activityAfterTool(call: AgentToolCall, output: string): string {
+  let result: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(output);
+    if (parsed && typeof parsed === "object") result = parsed as Record<string, unknown>;
+  } catch {
+    return "The document tool returned an invalid result.";
+  }
+  if (result.error === true) return `Research step not completed: ${String(result.message ?? "invalid tool request")}`;
+  if (call.name === "list_clauses") {
+    const sections = Array.isArray(result.sections) ? result.sections : [];
+    return sections.length ? `Found ${sections.length} document structure entries.` : "No document structure entries were found.";
+  }
+  if (call.name === "search_document") {
+    const results = Array.isArray(result.results) ? result.results : [];
+    return results.length ? `Found ${results.length} relevant excerpt${results.length === 1 ? "" : "s"}.` : "No relevant excerpts were found.";
+  }
+  if (call.name === "get_section") return `Evidence gathered from Section ${String(result.sectionNumber ?? "requested")}.`;
+  return "Document research step completed.";
+}
+
 export const GET = handle<P>(async (_req, { id }) => {
   const repos = await getRepositories();
   const doc = await repos.documents.get(id);
@@ -65,17 +182,21 @@ export const POST = handle<P>(async (req, { id }) => {
 
   const chat = await repos.chats.getOrCreateForDocument(id);
   const prior = await repos.chats.listMessages(chat.id);
-
-  const relevant = retrieveRelevantChunks(question, await repos.chunks.listByDocument(id));
-  const retrievalScope = {
-    chunkIndexes: relevant.chunkIndexes,
-    totalChunks: relevant.totalChunks,
-    coverage: relevant.coverage,
+  const storedChunks = await repos.chunks.listByDocument(id);
+  const chunks: ChunkRecord[] = storedChunks.length > 0
+    ? storedChunks
+    : buildDocumentChunks(doc.extractedText).map((chunk, index) => ({
+        ...chunk,
+        id: `${id}-reconstructed-${index}`,
+        documentId: id,
+        sectionHeading: chunk.sectionHeading ?? null,
+      }));
+  const researchSections = findNumberedSections(doc.extractedText);
+  const retrievalScope: { chunkIndexes: number[]; totalChunks: number; coverage: "full" | "partial" } = {
+    chunkIndexes: [],
+    totalChunks: researchSections.length || chunks.length,
+    coverage: "partial",
   };
-
-  const contextText = relevant.selected.length > 0
-    ? buildChunkContext(relevant.selected)
-    : "No relevant document excerpts were selected. Do not infer an answer from this absence.";
 
   await repos.chats.addMessage({
     chatId: chat.id,
@@ -111,87 +232,174 @@ export const POST = handle<P>(async (req, { id }) => {
     return apiError(503, "AI_CONFIG", detail.replace(/^Invalid AI provider configuration:\n?/, ""), { detail });
   }
 
-  const client = new OpenAI({
-    apiKey: aiEnv.AI_API_KEY,
-    baseURL: aiEnv.AI_BASE_URL,
-  });
-
-  const prompt = [
-    "You are a legal-contract analysis assistant. Use only the provided document excerpts. Never invent a quote or claim a statement is present unless it appears in the supplied text.",
-    "If the answer is not supported by those sections, say exactly: 'I couldn't find support for this in the sections searched.'",
-    "If the question is supported, answer in plain English and include a compact JSON object in the response body with: { answer: string, quotes: [{ quote: string }] }.",
-    `The AI received ${relevant.chunkIndexes.length} of ${relevant.totalChunks} document sections. If coverage is partial, say the search was limited and do not claim the whole document is absent of support.`,
-    relevant.documentWide
-      ? "This is a document-wide presence question. When coverage is partial, never answer with a confident no or claim the topic is absent; report only what was or was not found in the supplied sections and state the limitation. Even with full coverage, describe a lack of matching evidence rather than making a legal conclusion."
-      : "When a section or page was specified, prioritize the supplied matching section or page over unrelated excerpts.",
-    "Never mention page numbers or offsets that the model cannot prove from the excerpts.",
-  ].join("\n");
-
-  let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
-  try {
-    stream = await client.chat.completions.create({
-      model: aiEnv.AI_MODEL,
-      messages: [
-        { role: "system", content: prompt },
-        ...prior.slice(-8).map((message) => ({ role: message.role, content: message.content })),
-        { role: "user", content: `Question: ${question}\n\nRelevant excerpts:\n${contextText}` },
-      ],
-      stream: true,
-    });
-  } catch (error) {
-    const extra = error instanceof Error ? error.message : "";
-    const message = /model|not found|unsupported|invalid/i.test(extra)
-      ? "The configured AI model is unavailable. Update the model in the environment and try again."
-      : "The AI service is currently unavailable. Please try again in a moment.";
-    await repos.chats.updateMessage(assistantMessage.id, {
-      content: message,
-      status: "error",
-      quotes: [],
-      retrievalScope,
-    });
-    return apiError(503, "AI_UNAVAILABLE", message, { detail: extra });
-  }
-
+  const client = new OpenAI({ apiKey: aiEnv.AI_API_KEY, baseURL: aiEnv.AI_BASE_URL });
   const encoder = new TextEncoder();
-  const chunks: string[] = [];
-  const bodyStream = new ReadableStream({
+  const bodyStream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const onAbort = async () => {
-        const partial = chunks.join("").trim();
-        if (!partial) {
-          await repos.chats.updateMessage(assistantMessage.id, { status: "stopped", retrievalScope });
-        } else {
-          await repos.chats.updateMessage(assistantMessage.id, { content: partial, status: "stopped", retrievalScope });
+      let isClosed = false;
+      let visibleAnswer = "";
+      const send = (event: Record<string, unknown>) => {
+        if (!req.signal.aborted && !isClosed) controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+      const close = () => {
+        if (isClosed) return;
+        isClosed = true;
+        try {
+          controller.close();
+        } catch {
+          // The client may already have canceled the stream.
         }
-        controller.close();
+      };
+      const indexes = new Set<number>();
+      const retrievedEvidence: string[] = [];
+      let evidenceChars = 0;
+      let currentScope = retrievalScope;
+      const updateScope = async () => {
+        const chunkIndexes = [...indexes].sort((left, right) => left - right);
+        currentScope = {
+          chunkIndexes,
+          totalChunks: researchSections.length || chunks.length,
+          coverage: (researchSections.length || chunks.length) > 0 && chunkIndexes.length >= (researchSections.length || chunks.length) ? "full" : "partial",
+        };
+        await repos.chats.updateMessage(assistantMessage.id, { retrievalScope: currentScope });
       };
 
-      req.signal.addEventListener("abort", onAbort, { once: true });
-
       try {
-        for await (const part of stream) {
+        const instructions = researchInstructions(id, true);
+        let agentInput: ResponseInputItem[] = [
+          ...prior.slice(-8).map((message) => ({ role: message.role, content: message.content } as ResponseInputItem)),
+          { role: "user", content: question },
+        ];
+        const initialResponse = await client.responses.create({
+          model: aiEnv.AI_MODEL,
+          instructions,
+          input: agentInput,
+          tools: RESEARCH_TOOLS,
+          tool_choice: "auto",
+          parallel_tool_calls: true,
+          include: ["reasoning.encrypted_content"],
+          store: false,
+          max_output_tokens: 1200,
+        }, { signal: req.signal });
+
+        const getToolCalls = (response: typeof initialResponse): AgentToolCall[] => response.output.flatMap((item) =>
+          item.type === "function_call"
+            ? [{ callId: item.call_id, name: item.name, arguments: item.arguments }]
+            : [],
+        );
+
+        const agent = await runAgentToolLoop({
+          initialResponse,
+          getToolCalls,
+          executeTool: async (call) => {
+            if (req.signal.aborted) throw new DOMException("Aborted", "AbortError");
+            send({ type: "agent_activity", message: activityForTool(call, id, doc.extractedText ?? "") });
+            let result = executeDocumentResearchTool(call.name, call.arguments, {
+              documentId: id,
+              documentText: doc.extractedText ?? "",
+              chunks,
+            });
+            let serialized = JSON.stringify(result);
+            if (result.error !== true && evidenceChars + serialized.length > MAX_RESEARCH_EVIDENCE_CHARS) {
+              result = { error: true, message: "The research evidence budget is full. Answer using evidence already collected." };
+              serialized = JSON.stringify(result);
+            } else if (result.error !== true) {
+              evidenceChars += serialized.length;
+              if (typeof result.text === "string") retrievedEvidence.push(result.text);
+              if (Array.isArray(result.results)) {
+                for (const searchResult of result.results) {
+                  if (searchResult && typeof searchResult === "object" && typeof (searchResult as Record<string, unknown>).text === "string") {
+                    retrievedEvidence.push((searchResult as Record<string, string>).text);
+                  }
+                }
+              }
+              for (const researchIndex of getCoveredResearchIndexes(chunks, researchSections, result)) indexes.add(researchIndex);
+              await updateScope();
+            }
+            send({ type: "agent_activity", message: activityAfterTool(call, serialized) });
+            return serialized;
+          },
+          continueWithToolOutputs: async (response, outputs, allowTools) => {
+            agentInput = [
+              ...agentInput,
+              ...(response.output as unknown as ResponseInputItem[]),
+              ...outputs.map((item) => ({
+                type: "function_call_output",
+                call_id: item.callId,
+                output: item.output,
+              } as ResponseInputItem)),
+            ];
+            return client.responses.create({
+              model: aiEnv.AI_MODEL,
+              instructions,
+              input: agentInput,
+              tools: allowTools ? RESEARCH_TOOLS : [],
+              tool_choice: allowTools ? "auto" : "none",
+              parallel_tool_calls: true,
+              include: ["reasoning.encrypted_content"],
+              store: false,
+              max_output_tokens: 1200,
+            }, { signal: req.signal });
+          },
+        });
+
+        if (req.signal.aborted) throw new DOMException("Aborted", "AbortError");
+        if (evidenceChars > 0) send({ type: "agent_activity", message: "Evidence gathered from the selected document." });
+        else send({ type: "agent_activity", message: "No usable document evidence was gathered." });
+        send({ type: "agent_activity", message: "Preparing the answer..." });
+
+        const finalInstructions = [
+          researchInstructions(id, currentScope.coverage === "partial"),
+          "Research is complete. Do not call tools. Answer now using only the evidence and tool results in this conversation.",
+          agent.limitReached ? "The research-round limit was reached. Give the best supported answer and clearly state any evidence limitation." : "If evidence is insufficient, say so rather than guessing.",
+          currentScope.coverage === "partial" ? "Do not say a right, term, or clause does not exist or is not stated in the contract. Describe only what the retrieved sections affirmatively say and clearly limit the scope." : "The retrieved evidence covers every indexed document chunk.",
+        ].join("\n");
+        const finalInput: ResponseInputItem[] = [
+          ...agentInput,
+          ...(agent.response.output as unknown as ResponseInputItem[]),
+          { role: "user", content: "Produce the final supported answer now, followed by the required <QUOTES> JSON array." },
+        ];
+        const finalStream = await client.responses.create({
+          model: aiEnv.AI_MODEL,
+          instructions: finalInstructions,
+          input: finalInput,
+          tools: [],
+          tool_choice: "none",
+          include: ["reasoning.encrypted_content"],
+          store: false,
+          stream: true,
+          max_output_tokens: 1600,
+        }, { signal: req.signal });
+
+        let raw = "";
+        for await (const event of finalStream) {
           if (req.signal.aborted) break;
-          const delta = part.choices?.[0]?.delta?.content ?? "";
-          const text = typeof delta === "string" ? delta : "";
-          if (!text) continue;
-          chunks.push(text);
-          const combined = chunks.join("");
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "delta", text })}\n\n`));
-          await repos.chats.updateMessage(assistantMessage.id, { content: combined, status: "streaming" });
+          if (event.type !== "response.output_text.delta") continue;
+          raw += event.delta;
         }
 
-        if (req.signal.aborted) {
-          await onAbort();
-          return;
-        }
-
-        const raw = chunks.join("");
+        if (req.signal.aborted) throw new DOMException("Aborted", "AbortError");
         const parsed = parseStructuredAnswer(raw);
-        const answer = parsed.answer || "I couldn't find support for this in the sections searched.";
-        const documentText = doc.extractedText ?? "";
-        const verifiedQuotes = verifyQuotes(documentText, parsed.quotes, doc.pageRanges).map((quote) => ({
+        const answer = guardPartialCoverageAnswer(
+          parsed.answer || "I couldn't find support for this in the sections searched.",
+          currentScope.coverage,
+        );
+        for (let offset = 0; offset < answer.length; offset += 80) {
+          if (req.signal.aborted) throw new DOMException("Aborted", "AbortError");
+          const delta = answer.slice(offset, offset + 80);
+          visibleAnswer += delta;
+          send({ type: "delta", text: delta });
+          await repos.chats.updateMessage(assistantMessage.id, {
+            content: visibleAnswer,
+            status: "streaming",
+            retrievalScope: currentScope,
+          });
+        }
+        const quoteCandidates = parsed.quotes.length > 0
+          ? parsed.quotes
+          : [selectEvidenceQuote(question, retrievedEvidence)].filter((quote): quote is string => quote !== null);
+        const verifiedQuotes = verifyQuotes(doc.extractedText ?? "", quoteCandidates, doc.pageRanges).map((quote) => ({
           ...quote,
-          status: quote.status,
           reason: quote.status === "verified" ? "✓ Verified in Text" : "⚠️ Unverified: not found in text",
         }));
 
@@ -199,26 +407,29 @@ export const POST = handle<P>(async (req, { id }) => {
           content: answer,
           status: "complete",
           quotes: verifiedQuotes,
-          retrievalScope,
+          retrievalScope: currentScope,
         });
-
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: "done", answer, quotes: verifiedQuotes, retrievalScope })}\n\n`),
-        );
-        controller.close();
+        send({ type: "done", answer, quotes: verifiedQuotes, retrievalScope: currentScope });
       } catch (error) {
+        if (req.signal.aborted) {
+          await repos.chats.updateMessage(assistantMessage.id, {
+            content: visibleAnswer || "",
+            status: "stopped",
+            retrievalScope: currentScope,
+          });
+          return;
+        }
         const fallback = "The AI response failed. Please try again.";
         const message = error instanceof Error ? error.message : fallback;
         await repos.chats.updateMessage(assistantMessage.id, {
-          content: chunks.join("") || fallback,
+          content: visibleAnswer || fallback,
           status: "error",
           quotes: [],
-          retrievalScope,
+          retrievalScope: currentScope,
         });
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", message })}\n\n`));
-        controller.close();
+        send({ type: "error", message });
       } finally {
-        req.signal.removeEventListener("abort", onAbort);
+        close();
       }
     },
   });

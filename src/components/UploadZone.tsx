@@ -25,7 +25,7 @@ export function UploadZone({ config, onFiles }: { config: AppConfigDTO | null; o
       </span>
       <div>
         <p className="font-medium">
-          Drop your contracts here{config ? ` (PDF or DOCX up to ${config.maxPages} pages)` : " (PDF or DOCX)"}
+          Drop your contract here{config ? ` (PDF or DOCX up to ${config.maxPages} pages)` : " (PDF or DOCX)"}
         </p>
         {config && <p className="mt-1 font-mono text-xs text-taupe">Up to {formatBytes(config.maxUploadBytes)} per file</p>}
       </div>

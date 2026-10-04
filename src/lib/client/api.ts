@@ -45,7 +45,7 @@ export const getDocumentText = (id: string) => request<DocumentTextDTO>(`/api/do
 export const listDocumentMessages = (id: string) =>
   request<{ messages: ChatMessageDTO[] }>(`/api/documents/${id}/chat`, { cache: "no-store" }).then((data) => data.messages);
 
-export interface ChatEvent { type: "delta" | "done" | "error"; text?: string; answer?: string; quotes?: ChatMessageDTO["quotes"]; retrievalScope?: ChatMessageDTO["retrievalScope"]; message?: string; }
+export interface ChatEvent { type: "delta" | "done" | "error" | "agent_activity"; text?: string; answer?: string; quotes?: ChatMessageDTO["quotes"]; retrievalScope?: ChatMessageDTO["retrievalScope"]; message?: string; }
 export interface MultiQuoteEvent {
   documentId: string;
   sourceDocument: string;
